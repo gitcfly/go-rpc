@@ -4,7 +4,6 @@ golang rpc框架
 #服务端教程
 ```
 // 声明服务
-```
 type TestServer struct {
 	CallName func(string, int) (string, int)
 	CallData func(string)
