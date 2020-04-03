@@ -2,11 +2,13 @@ package rpc
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"reflect"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitcfly/go-rpc/tools"
+	"github.com/gitcfly/tryct/try"
 	"github.com/kirinlabs/HttpRequest"
 )
 
@@ -38,10 +40,14 @@ func (rpcServer *RpcServer) Run() {
 }
 
 func httpServer(c *gin.Context) {
-	var rpcRequest RpcReqest
-	c.BindJSON(&rpcRequest)
-	result := invoke(rpcRequest)
-	c.JSON(http.StatusOK, result)
+	try.Try(func() {
+		var rpcRequest RpcReqest
+		c.BindJSON(&rpcRequest)
+		result := invoke(rpcRequest)
+		c.JSON(http.StatusOK, result)
+	}).Catch(func(err interface{}) {
+		fmt.Printf("服务端调用异常,err: %v \n", err)
+	})
 }
 
 type RpcClient struct {
@@ -71,51 +77,66 @@ func (rpcServer *RpcServer) Service(obj interface{}) {
 }
 
 func invoke(req RpcReqest) RpcResponse {
-	instance := PsmService[req.Psm].SerMap[req.Path]
-	ve := reflect.ValueOf(instance).Elem()
-	mt := ve.FieldByName(req.Fname)
-	ft := mt.Type()
-	var args []reflect.Value
-	for idx, arg := range req.Args {
-		temp := reflect.New(ft.In(idx)).Interface()
-		bytes, _ := json.Marshal(arg)
-		json.Unmarshal(bytes, &temp)
-		args = append(args, reflect.ValueOf(temp).Elem())
-	}
-	result := mt.Call(args)
-	var resps []interface{}
-	for _, e := range result {
-		resps = append(resps, e.Interface())
-	}
-	return RpcResponse{Outs: resps}
+	var rpcResp RpcResponse
+	try.Try(func() {
+		instance := PsmService[req.Psm].SerMap[req.Path]
+		ve := reflect.ValueOf(instance).Elem()
+		mt := ve.FieldByName(req.Fname)
+		ft := mt.Type()
+		var args []reflect.Value
+		for idx, arg := range req.Args {
+			temp := reflect.New(ft.In(idx)).Interface()
+			bytes, _ := json.Marshal(arg)
+			json.Unmarshal(bytes, &temp)
+			args = append(args, reflect.ValueOf(temp).Elem())
+		}
+		result := mt.Call(args)
+		var outs []interface{}
+		for _, e := range result {
+			outs = append(outs, e.Interface())
+		}
+		rpcResp.Outs = outs
+	}).Catch(func(err interface{}) {
+		fmt.Printf("服务端调用异常，request: %v ,err: %v \n", req, err)
+	})
+	return rpcResp
 }
 
 func (client *RpcClient) Client(obj interface{}) interface{} {
 	objValue := reflect.ValueOf(obj).Elem()
+	objType := objValue.Type()
 	pkgPath := objValue.Type().PkgPath() + "/" + objValue.Type().Name()
 	for i := 0; i < objValue.NumField(); i++ {
 		field := objValue.Field(i)
-		method := objValue.Type().Field(i).Name
-		fun := reflect.MakeFunc(field.Type(), func(args []reflect.Value) (results []reflect.Value) {
+		method := objType.Field(i).Name
+		fun := reflect.MakeFunc(field.Type(), createFunc(client, field.Type(), pkgPath, method))
+		field.Set(fun)
+	}
+	return obj
+}
+
+func createFunc(client *RpcClient, funcType reflect.Type, pkg string, method string) func(args []reflect.Value) (results []reflect.Value) {
+	return func(args []reflect.Value) (results []reflect.Value) {
+		try.Try(func() {
 			var interArgs []interface{}
 			for _, arg := range args {
 				interArgs = append(interArgs, arg.Interface())
 			}
 			req := HttpRequest.NewRequest()
-			rpcR := RpcReqest{Psm: client.Psm, Path: pkgPath, Fname: method, Args: interArgs}
+			rpcR := RpcReqest{Psm: client.Psm, Path: pkg, Fname: method, Args: interArgs}
 			response, _ := req.Post(client.Addr, tools.ToJsonString(rpcR))
 			resBody, _ := response.Body()
 			var rpcResp RpcResponse
 			json.Unmarshal(resBody, &rpcResp)
 			for idx, out := range rpcResp.Outs {
 				bytes, _ := json.Marshal(out)
-				rOut := reflect.New(field.Type().Out(idx)).Interface()
+				rOut := reflect.New(funcType.Out(idx)).Interface()
 				json.Unmarshal(bytes, &rOut)
 				results = append(results, reflect.ValueOf(rOut).Elem())
 			}
-			return results
+		}).Catch(func(err interface{}) {
+			fmt.Printf("call func error ,function: %v ,error: %v \n", funcType, err)
 		})
-		field.Set(fun)
+		return results
 	}
-	return obj
 }
