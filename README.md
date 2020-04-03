@@ -27,7 +27,6 @@ func InstanceTestServer() *TestServer {
 ```
 服务端使用示例
 ```
-
 	// 1、初始化rpc服务端实例，参数1：psm,可以随意指定，参数2：服务地址ip:port形式
 	rpcServer := rpc.NewRpcServer("ckj.gitcfly.rpc", ":8080")
 	// 2、注册服务
