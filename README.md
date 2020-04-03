@@ -1,5 +1,5 @@
 # go-rpc
-golang rpc框架
+golang rpc框架，纯go 实现，无需任何代码生成工具，引入即用
 
 获取：go get -u github.com/gitcfly/go-rpc
 
