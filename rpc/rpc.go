@@ -3,16 +3,17 @@ package rpc
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"reflect"
 
-	"github.com/gin-gonic/gin"
-	"github.com/gitcfly/go-rpc/tools"
+	"github.com/fwhezfwhez/tcpx"
 	"github.com/gitcfly/tryct/try"
-	"github.com/kirinlabs/HttpRequest"
 )
 
 var PsmService = make(map[string]*RpcServer)
+
+var packx = tcpx.NewPackx(tcpx.JsonMarshaller{})
 
 type RpcServer struct {
 	Psm    string
@@ -32,17 +33,16 @@ func NewRpcServer(psm string, addr string) *RpcServer {
 
 func (rpcServer *RpcServer) Run() {
 	go func() {
-		gin.SetMode("release")
-		g := gin.Default()
-		g.Any("/", httpServer)
-		g.Run(rpcServer.Addr)
+		srv := tcpx.NewTcpX(tcpx.JsonMarshaller{})
+		srv.OnMessage = httpServer
+		srv.ListenAndServe("tcp", rpcServer.Addr)
 	}()
 }
 
-func httpServer(c *gin.Context) {
+func httpServer(c *tcpx.Context) {
 	try.Try(func() {
 		var rpcRequest RpcReqest
-		c.BindJSON(&rpcRequest)
+		c.Bind(&rpcRequest)
 		result := invoke(rpcRequest)
 		c.JSON(http.StatusOK, result)
 	}).Catch(func(err interface{}) {
@@ -53,10 +53,12 @@ func httpServer(c *gin.Context) {
 type RpcClient struct {
 	Psm  string
 	Addr string
+	conn net.Conn
 }
 
 func NewRpcClient(psm string, addr string) *RpcClient {
-	return &RpcClient{Psm: psm, Addr: addr}
+	conn, _ := net.Dial("tcp", addr)
+	return &RpcClient{Psm: psm, Addr: addr, conn: conn}
 }
 
 type RpcResponse struct {
@@ -122,12 +124,12 @@ func createFunc(client *RpcClient, funcType reflect.Type, pkg string, method str
 			for _, arg := range args {
 				interArgs = append(interArgs, arg.Interface())
 			}
-			req := HttpRequest.NewRequest()
 			rpcR := RpcReqest{Psm: client.Psm, Path: pkg, Fname: method, Args: interArgs}
-			response, _ := req.Post(client.Addr, tools.ToJsonString(rpcR))
-			resBody, _ := response.Body()
+			buf, _ := packx.Pack(1, rpcR)
+			client.conn.Write(buf)
+			respBytes, _ := tcpx.FirstBlockOf(client.conn)
 			var rpcResp RpcResponse
-			json.Unmarshal(resBody, &rpcResp)
+			packx.Unpack(respBytes, &rpcResp)
 			for idx, out := range rpcResp.Outs {
 				bytes, _ := json.Marshal(out)
 				rOut := reflect.New(funcType.Out(idx)).Interface()

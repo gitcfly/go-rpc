@@ -51,7 +51,7 @@ func ServerSimple() {
 // 以下是客户端教程
 func ClientSimple() {
 	// 1、初始化客户端实例，参数psm要和服务端的一致
-	client := rpc.NewRpcClient("ckj.gitcfly.rpc", "http://127.0.0.1:8080")
+	client := rpc.NewRpcClient("ckj.gitcfly.rpc", "127.0.0.1:8080")
 	// 2、注册服务
 	netServer := client.Client(&TestServer{}).(*TestServer)
 	// 3、调用服务方法1
